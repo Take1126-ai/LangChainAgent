@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+docs/
+tests/
+参考/
+# Ignore Python bytecode and cache
+*.py[cod]
+*$py.class
+.pytest_cache/

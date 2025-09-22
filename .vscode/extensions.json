@@ -1,0 +1,8 @@
+{
+  "recommendations": [
+    "charliermarsh.ruff",
+    "mhutchie.git-graph",
+    "donjayamanne.githistory",
+    "adam-bender.commit-message-editor"
+  ]
+}

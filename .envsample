@@ -1,0 +1,3 @@
+# Store your API keys and sensitive information here(********************)
+TAVILY_API_KEY="********************"
+GOOGLE_API_KEY="********************"
