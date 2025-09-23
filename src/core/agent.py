@@ -1,4 +1,4 @@
-from typing import TypedDict, List, Annotated
+from typing import TypedDict, List, Annotated, Optional, Dict, Any
 from langchain_core.messages import BaseMessage, AIMessage, ToolMessage, HumanMessage # HumanMessage を追加
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langgraph.graph import StateGraph, END
@@ -21,49 +21,70 @@ from src.core.prompts import create_agent_prompt, VERIFICATION_PROMPT # VERIFICA
 from src.tools.file_operations import file_tools, read_many_files, search_file_content # 変更
 from src.tools.internet_search import internet_search # 追加
 from src.tools.command_execution import run_shell_command # 追加
-
-# Define the prompt # ここに移動
-prompt = ChatPromptTemplate.from_messages(
-    [
-        ("system", create_agent_prompt()), # Use the function to get the prompt
-        MessagesPlaceholder(variable_name="chat_history"),
-        ("user", "{input}"),
-    ]
-)
+from src.tools.think_tool import think_tool # 追加
+from src.tools.work_tool import work_tool # 追加
 
 # Define the tools
 # file_tools と internet_search と run_shell_command を結合
-all_tools = file_tools + [internet_search, run_shell_command, read_many_files, search_file_content] # 変更
+all_tools = file_tools + [internet_search, run_shell_command, read_many_files, search_file_content, think_tool, work_tool] # 変更
 tools = {t.name: t for t in all_tools} # 変更
 
 # Initialize LLM and bind tools
 llm = ChatGoogleGenerativeAI(model=Config.MODEL_NAME, temperature=0)
 llm_with_tools = llm.bind_tools(all_tools) # 変更
 
-chain = prompt | llm_with_tools
+# NOTE: The prompt and chain are now created dynamically inside the run_agent node
 
 # Define the state for our graph # ここに移動
 class AgentState(TypedDict):
     input: str
     chat_history: Annotated[list[BaseMessage], operator.add]
+    # The 'tool_results' field is for holding the output of the last tool call.
+    # It is cleared after being used by the agent.
+    tool_results: Annotated[list, operator.add]
     always_allowed_tools: Annotated[set[str], operator.or_]
-    verification_attempts: int # 追加
+
+    # Fields for work_tool
+    overall_policy: Optional[str]
+    worker_role: Optional[str]
+    work_rules: Optional[str]
+    work_plan: Optional[str]
+    work_content: Optional[str]
+    work_purpose: Optional[str]
+    work_results: Optional[str]
+    current_issues: Optional[str]
+    issue_countermeasures: Optional[str]
+    next_steps: Optional[str]
+    memos: Optional[str]
+    todo_list: Optional[List[Dict[str, Any]]]
 
 # Agent node function
 def run_agent(state: AgentState):
     if Config.DEBUG_MODE: # 追加
         print("\n--- 1. Entering run_agent ---")
         print(f"State: {state}")
-    # always_allowed_tools を state から取得し、chain.invoke に渡す
-    # chain.invoke は state の input と chat_history を使用
-    result = chain.invoke({"input": state["input"], "chat_history": state["chat_history"]})
 
-    # chat_history の長さを制限
-    if Config.MEMORY_TURNS > 0 and len(state["chat_history"]) > Config.MEMORY_TURNS:
-        # 古いメッセージを削除 (Config.MEMORY_TURNS の数だけ残す)
-        state["chat_history"] = state["chat_history"][-Config.MEMORY_TURNS:]
+    # Dynamically create the prompt and chain for this turn
+    system_prompt_str = create_agent_prompt(state)
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt_str),
+            MessagesPlaceholder(variable_name="chat_history"),
+            MessagesPlaceholder(variable_name="tool_results", optional=True),
+            ("user", "{input}"),
+        ]
+    )
+    chain = prompt | llm_with_tools
 
-    return {"chat_history": [result]}
+    # Invoke the chain with the current state
+    result = chain.invoke({
+        "input": state["input"],
+        "chat_history": state["chat_history"],
+        "tool_results": state.get("tool_results", [])
+    })
+    
+    # Clear tool_results after they have been "consumed" by the agent
+    return {"chat_history": [result], "tool_results": []}
 
 # Custom tool execution node
 def execute_tools(state: AgentState):
@@ -82,7 +103,7 @@ def execute_tools(state: AgentState):
         tool_args = tool_call["args"]
 
         # ファイルシステムを変更する可能性のあるツールを特定
-        is_modifying_tool = tool_name not in ["list_directory_contents", "read_file", "internet_search", "read_many_files", "search_file_content"] # 変更
+        is_modifying_tool = tool_name not in ["list_directory_contents", "read_file", "internet_search", "read_many_files", "search_file_content", "think_tool", "work_tool"] # 変更
         # run_shell_command はファイルシステムを変更する可能性があるため、常に承認を求める
         if tool_name == "run_shell_command": # 追加
             is_modifying_tool = True # 追加
@@ -137,7 +158,7 @@ def execute_tools(state: AgentState):
     if Config.DEBUG_MODE: # 追加
         print(f"Tool Messages: {tool_messages}")
     # 更新された always_allowed_tools を state に含めて返す
-    return {"chat_history": tool_messages, "always_allowed_tools": updated_always_allowed_tools}
+    return {"tool_results": tool_messages, "always_allowed_tools": updated_always_allowed_tools}
 
 # 検証エージェントノード
 def verify_output(state: AgentState):
@@ -159,17 +180,12 @@ def verify_output(state: AgentState):
         if isinstance(msg, ToolMessage):
             tool_results += f"Tool: {msg.tool_call_id}, Content: {msg.content}\n"
 
-    # 検証プロンプトの作成
-    verification_prompt_template = ChatPromptTemplate.from_messages([
-        ("system", VERIFICATION_PROMPT.format(user_request=user_request, agent_final_response=agent_final_response, tool_results=tool_results))
-    ])
-
     # 検証用LLMの呼び出し (ツールはバインドしない)
     verification_llm_model = ChatGoogleGenerativeAI(model=Config.MODEL_NAME, temperature=0)
     
     # 検証LLMに評価させる
     messages_to_llm = [
-        HumanMessage(content=VERIFICATION_PROMPT.format(user_request=user_request, agent_final_response=agent_final_response, tool_results=tool_results))
+        HumanMessage(content=VERIFICATION_PROMPT.format(strength_of_verification=Config.STRENGTH_OF_VERIFICATION, agent_prompt=create_agent_prompt(), user_request=user_request, agent_final_response=agent_final_response, tool_results=tool_results))
     ]
     verification_result_message = verification_llm_model.invoke(messages_to_llm)
     verification_content = verification_result_message.content.strip()
@@ -178,7 +194,7 @@ def verify_output(state: AgentState):
         print(f"検証エージェントの評価結果:\n{repr(verification_content)}\n")
     
     if Config.DEBUG_MODE:
-        print(f"Condition check: {'[問題なし]' in verification_content}")
+        print(f"Condition check: {'問題なし' in verification_content}")
 
     # 評価結果の解析 (例: "[問題なし]" が含まれていればOK)
     if "問題なし" in verification_content:
@@ -196,11 +212,11 @@ def verify_output(state: AgentState):
         # 最大試行回数を超えたら強制終了またはユーザーに介入を求める
         if new_attempts >= Config.MAX_VERIFICATION_ATTEMPTS: # 変更
             final_message = f"AIの応答を複数回検証しましたが、問題が解決しませんでした。ユーザーの介入が必要です。\n\n検証エージェントからのフィードバック:\n{verification_content}"
-            return {"chat_history": [AIMessage(content=final_message)], "verification_attempts": new_attempts}
+            return {"chat_history": [AIMessage(content=final_message)], "verification_attempts": 0} # カウンターをリセット
         else:
             # メインエージェントにフィードバックを返す
             feedback_message = f"AIの応答に問題が見つかりました。再検討してください。\n\n検証エージェントからのフィードバック:\n{verification_content}"
-            return {"chat_history": [AIMessage(content=feedback_message)], "verification_attempts": new_attempts}
+            return {"chat_history": [AIMessage(content=feedback_message)], "verification_attempts": 0} # カウンターをリセット
 
 # Conditional logic for branching
 def should_continue(state: AgentState):
@@ -209,8 +225,8 @@ def should_continue(state: AgentState):
         print(f"State: {state}")
     if isinstance(state["chat_history"][-1], AIMessage) and state["chat_history"][-1].tool_calls:
         return "tools"
-    # ツール呼び出しがない場合、検証エージェントに渡す
-    return "verify_output" # 変更
+    # ツール呼び出しがない場合、処理を終了する
+    return "end"
 
 # Conditional logic for branching for verify_output
 def should_reverify(state: AgentState):
@@ -229,7 +245,7 @@ def create_agent_graph():
     workflow.add_conditional_edges(
         "agent",
         should_continue,
-        {"tools": "tools", "verify_output": "verify_output"}, # 変更
+        {"tools": "tools", "end": END}, # 変更: verify_output をバイパスして END に向かう
     )
     workflow.add_edge("tools", "agent")
     # 検証エージェントからの遷移

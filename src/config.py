@@ -21,7 +21,8 @@ class Config: # クラス名を変更
 
 
     # デバッグ設定
-    DEBUG_MODE: bool = False
+    DEBUG_MODE: bool = True
 
     # 検証エージェント設定
     MAX_VERIFICATION_ATTEMPTS: int = 3
+    STRENGTH_OF_VERIFICATION: str = "30"  # 追加: 検証の厳しさ (1-100)
