@@ -52,6 +52,11 @@ def create_agent_prompt(state: dict) -> str:
 - 作業完了後は完了した作業を完了状態に更新して報告します。
 - 計画変更が発生したら最新の作業計画をwork_toolに登録します。
 - 未完了タスクを優先実行し、必要に応じて新規タスクを追加・修正します。
+- タスクが複数のステップを要する場合、または複雑な思考プロセスを伴う場合は、tool実行結果のうち回答に必要な情報をmemosフィールドに「作業用メモリ」として書き込むこと。
+- 作業完了時、またはmemosに記録された情報が不要になった場合は、memosフィールドから該当する情報を削除し、常に最新かつ必要な情報のみを保持すること。
+- 最終回答をユーザーに提示する前に、必ずthink_toolを用いて回答内容を自己評価すること。
+- 自己評価の結果、問題が見つかった場合は、回答を修正し、再度think_toolで評価を行うこと。
+- 問題がないと判断された場合にのみ、最終回答をユーザーに提示すること。
 </タスク遂行の考え方>
 
 <TODOリスト管理>
@@ -77,6 +82,7 @@ todo_list は {{{{"task": "タスク内容", "completed": False}}}}の形式で�
 <利用可能なツール>
 - work_tool(overall_policy: str = None, worker_role: str = None, work_rules: str = None, work_plan: str = None, work_content: str = None, work_purpose: str = None, work_results: str = None, current_issues: str = None, issue_countermeasures: str = None, next_steps: str = None, memos: str = None, todo_list: List[Dict[str, Any]] = None): 
 エージェントの作業状態、計画、課題などを管理するためのツール。作業を行う際は必ずこのツールに作業を登録する。実施した作業は作業計画上で完了状態とし、まだ完了していない作業を行う。各パラメータは各パラメータは独立して更新可能で、指定された値がAgentStateに反映されます。
+- think_tool(reflection: str): 作業の進捗、意思決定、および最終回答の品質を戦略的に振り返り、自己評価するためのツール。
 - list_directory_contents(path: str): 指定されたパスのディレクトリ内容を一覧表示します。
 - read_file(path: str): 指定されたパスのファイル内容を読み込んで返します。
 - write_file(path: str, content: str): 指定されたパスに内容を書き込みます（ファイルが存在する場合は上書きされます）。
@@ -89,7 +95,6 @@ todo_list は {{{{"task": "タスク内容", "completed": False}}}}の形式で�
 - run_shell_command(command: str, cwd: str = None): 指定されたシェルコマンドを実行し、その結果を返します。
 - read_many_files(paths: list[str], exclude: list[str] = [], include: list[str] = [], recursive: bool = True, useDefaultExcludes: bool = True): 複数のファイルやディレクトリの内容を読み込みます。globパターンもサポートします。テキストファイルのみを対象とし、バイナリファイルはスキップされます。
 - search_file_content(pattern: str, include: str = None, path: str = None): 指定されたディレクトリ内のファイル内容から正規表現パターンを検索します。マッチした行、ファイルパス、行番号を返します。
-- think_tool(reflection: str): 作業の進捗や意思決定を戦略的に振り返るためのツール。
 </利用可能なツール>
 
 <ユーザー承認が必要なツール>
@@ -98,64 +103,3 @@ todo_list は {{{{"task": "タスク内容", "completed": False}}}}の形式で�
 </ユーザー承認が必要なツール>
 """
     return prompt
-
-# 検証エージェントプロンプト (ハルシネーション対策)
-VERIFICATION_PROMPT = """
-<AIの役割>
-あなたはAIアシスタントの出力内容を検証する役割を担うAIです。
-</AIの役割>
-</前提>
-
-<指示>
-- AIアシスタントのプロンプト、AIアシスタントの最終応答、使用したツールの結果、およびユーザーとの会話履歴を照合して、
-AIアシスタントの出力に問題がないか確認してください。
-- 問題がある場合は、具体的な修正案を提示してください。
-- 検証の厳しさは{strength_of_verification}です。1から100の範囲で指定され、数値が高いほど厳密に検証します。1は検証せず問題なし、100は非常に厳密に検証します。
-<観点>
-- AIアシスタントのプロンプトに沿った回答になっているか
-- ハルシネーションや不適切な出力がないか
-- AIアシスタントの出力が正確か
-- ユーザーの要求と矛盾しないか
-- 不正確な情報や誤解を招く表現を含んでいないか
-</観点>
-</指示>
-
-<AIアシスタントのプロンプト>
-{agent_prompt}
-</AIアシスタントのプロンプト>
-
-<AIアシスタントの最終応答>
-{agent_final_response}
-</AIアシスタントの最終応答>
-
-<ユーザーとの会話履歴>
-{user_request}
-</ユーザーとの会話履歴>
-
-<使用したツールの結果>
-{tool_results}
-</使用したツールの結果>
-
-<出力>
-<検証結果>
-[問題なし/問題あり]
-</検証結果>
-<修正案>
-[問題がある場合のみ、具体的な修正案を記述]
-</修正案>
-</出力>
-"""
-
-# 会話要約プロンプト
-SUMMARY_PROMPT = """<前提>
-あなたは過去の会話履歴を簡潔に要約するAIです。重要な情報や決定事項、未解決のタスクなどを抽出し、後から参照しやすい形式でまとめてください。
-</前提>
-
-<指示>
-以下の会話履歴を要約してください。
-</指示>
-
-<会話履歴>
-{conversation_history}
-</会話履歴>
-"""

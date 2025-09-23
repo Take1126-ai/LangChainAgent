@@ -16,7 +16,7 @@ project_root_path = current_file_path.parent.parent.parent # Adjusted for src/co
 sys.path.append(str(project_root_path))
 
 from src.config import Config
-from src.core.prompts import create_agent_prompt, VERIFICATION_PROMPT # VERIFICATION_PROMPT を追加
+from src.core.prompts import create_agent_prompt
 
 from src.tools.file_operations import file_tools, read_many_files, search_file_content # 変更
 from src.tools.internet_search import internet_search # 追加
@@ -83,6 +83,12 @@ def run_agent(state: AgentState):
         "tool_results": state.get("tool_results", [])
     })
     
+    if Config.WRITE_INNER_THOUGHTS:
+        print(f"\nINNER_THOUGHT: Agent generated AIMessage: {result.content}\n")
+        if result.tool_calls:
+            for tool_call in result.tool_calls:
+                print(f"\nINNER_THOUGHT:   Tool Call: {tool_call['name']} with args {tool_call['args']}\n")
+
     # Clear tool_results after they have been "consumed" by the agent
     return {"chat_history": [result], "tool_results": []}
 
@@ -117,13 +123,12 @@ def execute_tools(state: AgentState):
             continue # 次のツール呼び出しへ
 
         # ユーザーに確認を求める
-        if Config.DEBUG_MODE: # 追加
-            print(f"\n--- ツール実行の確認 ---")
-            print(f"AIは '{tool_name}' を実行しようとしています。引数: {tool_args}")
-            print("選択肢:")
-            print("  1. 一度だけ実行許可")
-            print("  2. 今後も実行許可 (この種類のツールは次回から確認しません)")
-            print("  3. 実行を許可せず、新しい指示を入力する")
+        print(f"\n--- ツール実行の確認 ---")
+        print(f"AIは '{tool_name}' を実行しようとしています。引数: {tool_args}")
+        print("選択肢:")
+        print("  1. 一度だけ実行許可")
+        print("  2. 今後も実行許可 (この種類のツールは次回から確認しません)")
+        print("  3. 実行を許可せず、新しい指示を入力する")
 
         user_choice = None
         try:
@@ -157,67 +162,12 @@ def execute_tools(state: AgentState):
             
     if Config.DEBUG_MODE: # 追加
         print(f"Tool Messages: {tool_messages}")
+    if Config.WRITE_INNER_THOUGHTS:
+        print(f"\nINNER_THOUGHT: Tool execution completed. Results: {tool_messages}\n")
     # 更新された always_allowed_tools を state に含めて返す
     return {"tool_results": tool_messages, "always_allowed_tools": updated_always_allowed_tools}
 
 # 検証エージェントノード
-def verify_output(state: AgentState):
-    if Config.DEBUG_MODE:
-        print("\n--- 4. Entering verify_output ---")
-        print(f"State: {state}")
-
-    user_request = state["input"]
-    agent_final_response = ""
-    # chat_history を逆順に見て、最初の AIMessage の content を取得
-    for msg in reversed(state["chat_history"]):
-        if isinstance(msg, AIMessage):
-            agent_final_response = msg.content
-            break
-            
-    tool_results = ""
-    # ツール実行結果を収集 (ToolMessage のみを対象)
-    for msg in state["chat_history"]:
-        if isinstance(msg, ToolMessage):
-            tool_results += f"Tool: {msg.tool_call_id}, Content: {msg.content}\n"
-
-    # 検証用LLMの呼び出し (ツールはバインドしない)
-    verification_llm_model = ChatGoogleGenerativeAI(model=Config.MODEL_NAME, temperature=0)
-    
-    # 検証LLMに評価させる
-    messages_to_llm = [
-        HumanMessage(content=VERIFICATION_PROMPT.format(strength_of_verification=Config.STRENGTH_OF_VERIFICATION, agent_prompt=create_agent_prompt(), user_request=user_request, agent_final_response=agent_final_response, tool_results=tool_results))
-    ]
-    verification_result_message = verification_llm_model.invoke(messages_to_llm)
-    verification_content = verification_result_message.content.strip()
-
-    if Config.DEBUG_MODE:
-        print(f"検証エージェントの評価結果:\n{repr(verification_content)}\n")
-    
-    if Config.DEBUG_MODE:
-        print(f"Condition check: {'問題なし' in verification_content}")
-
-    # 評価結果の解析 (例: "[問題なし]" が含まれていればOK)
-    if "問題なし" in verification_content:
-        if Config.DEBUG_MODE:
-            print("検証結果: OK")
-        return {"chat_history": [AIMessage(content=agent_final_response)], "verification_attempts": 0} # 成功したらカウンターをリセット
-    else:
-        # 問題ありの場合、カウンターをインクリメント
-        current_attempts = state.get("verification_attempts", 0)
-        new_attempts = current_attempts + 1
-        
-        if Config.DEBUG_MODE:
-            print(f"検証結果: NG (試行回数: {new_attempts})")
-
-        # 最大試行回数を超えたら強制終了またはユーザーに介入を求める
-        if new_attempts >= Config.MAX_VERIFICATION_ATTEMPTS: # 変更
-            final_message = f"AIの応答を複数回検証しましたが、問題が解決しませんでした。ユーザーの介入が必要です。\n\n検証エージェントからのフィードバック:\n{verification_content}"
-            return {"chat_history": [AIMessage(content=final_message)], "verification_attempts": 0} # カウンターをリセット
-        else:
-            # メインエージェントにフィードバックを返す
-            feedback_message = f"AIの応答に問題が見つかりました。再検討してください。\n\n検証エージェントからのフィードバック:\n{verification_content}"
-            return {"chat_history": [AIMessage(content=feedback_message)], "verification_attempts": 0} # カウンターをリセット
-
 # Conditional logic for branching
 def should_continue(state: AgentState):
     if Config.DEBUG_MODE: # 追加
@@ -228,31 +178,19 @@ def should_continue(state: AgentState):
     # ツール呼び出しがない場合、処理を終了する
     return "end"
 
-# Conditional logic for branching for verify_output
-def should_reverify(state: AgentState):
-    # 検証エージェントからのメッセージがフィードバックの場合
-    if state["chat_history"] and isinstance(state["chat_history"][-1], AIMessage) and "検証エージェントからのフィードバック" in state["chat_history"][-1].content:
-        return "reverify" # 再検証が必要
-    return "end_verification" # 検証完了
+
 
 # Build the graph
 def create_agent_graph():
     workflow = StateGraph(AgentState)
     workflow.add_node("agent", run_agent)
     workflow.add_node("tools", execute_tools)
-    workflow.add_node("verify_output", verify_output) # 追加
     workflow.set_entry_point("agent")
     workflow.add_conditional_edges(
         "agent",
         should_continue,
-        {"tools": "tools", "end": END}, # 変更: verify_output をバイパスして END に向かう
+        {"tools": "tools", "end": END},
     )
     workflow.add_edge("tools", "agent")
-    # 検証エージェントからの遷移
-    workflow.add_conditional_edges( # 追加
-        "verify_output", # 追加
-        should_reverify, # 追加
-        {"reverify": "agent", "end_verification": END}, # 追加
-    ) # 追加
     memory = MemorySaver()
     return workflow.compile(checkpointer=memory)

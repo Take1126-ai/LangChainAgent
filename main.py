@@ -32,17 +32,13 @@ def chat():
 
         # エージェントを呼び出し、応答を取得
         # input と chat_history は LangGraph の State に自動的にマージされる
-        # 新しい会話セッションの開始時に verification_attempts を初期化
-        initial_state = {"input": user_input, "verification_attempts": 0} # 変更
+        initial_state = {"input": user_input}
         result = agent_app.invoke(initial_state, config=config)
         
         # エージェントの最終応答を表示
-        # chat_history の最後のメッセージがAIの応答
         final_ai_message = result.get("chat_history", [])[-1]
         if isinstance(final_ai_message, AIMessage):
             typer.echo(f"AI: {final_ai_message.content}")
-        else:
-            typer.echo(f"AI: (応答なし - {final_ai_message})")
 
 if __name__ == "__main__":
     app()

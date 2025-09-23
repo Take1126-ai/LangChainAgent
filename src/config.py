@@ -19,10 +19,7 @@ class Config: # クラス名を変更
     # MEMORY_TURNS: 会話履歴に保持するターン数。0の場合は上限なし。
     MEMORY_TURNS: int = int("0")
 
-
     # デバッグ設定
-    DEBUG_MODE: bool = True
-
-    # 検証エージェント設定
-    MAX_VERIFICATION_ATTEMPTS: int = 3
-    STRENGTH_OF_VERIFICATION: str = "30"  # 追加: 検証の厳しさ (1-100)
+    DEBUG_MODE: bool = False
+    # エージェントの内部思考を表示するかどうか
+    WRITE_INNER_THOUGHTS: bool = True
