@@ -84,10 +84,10 @@ def run_agent(state: AgentState):
     })
     
     if Config.WRITE_INNER_THOUGHTS:
-        print(f"\nINNER_THOUGHT: Agent generated AIMessage: {result.content}\n")
+        print(f"\n<INNER_THOUGHT>\n: Agent generated AIMessage: {result.content}\n</INNER_THOUGHT>\n")
         if result.tool_calls:
             for tool_call in result.tool_calls:
-                print(f"\nINNER_THOUGHT:   Tool Call: {tool_call['name']} with args {tool_call['args']}\n")
+                print(f"\n<INNER_THOUGHT>\n Tool Call: {tool_call['name']} with args {tool_call['args']}\n</INNER_THOUGHT>\n")
 
     # Clear tool_results after they have been "consumed" by the agent
     return {"chat_history": [result], "tool_results": []}
@@ -163,7 +163,7 @@ def execute_tools(state: AgentState):
     if Config.DEBUG_MODE: # 追加
         print(f"Tool Messages: {tool_messages}")
     if Config.WRITE_INNER_THOUGHTS:
-        print(f"\nINNER_THOUGHT: Tool execution completed. Results: {tool_messages}\n")
+        print(f"\n<INNER_THOUGHT>\nTool execution completed. Results: {tool_messages}\n</INNER_THOUGHT>\n")
     # 更新された always_allowed_tools を state に含めて返す
     return {"tool_results": tool_messages, "always_allowed_tools": updated_always_allowed_tools}
 
