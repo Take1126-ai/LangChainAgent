@@ -2,6 +2,8 @@ import platform
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
+from src.config import Config
+
 # 基本的なエージェントプロンプトを生成する関数
 def create_agent_prompt(state: dict) -> str:
     os_name = platform.system()
@@ -54,6 +56,7 @@ def create_agent_prompt(state: dict) -> str:
 - 未完了タスクを優先実行し、必要に応じて新規タスクを追加・修正します。
 - タスクが複数のステップを要する場合、または複雑な思考プロセスを伴う場合は、tool実行結果のうち回答に必要な情報をmemosフィールドに「作業用メモリ」として書き込むこと。
 - 作業完了時、またはmemosに記録された情報が不要になった場合は、memosフィールドから該当する情報を削除し、常に最新かつ必要な情報のみを保持すること。
+- 会話履歴は、**会話ターン数が** `MAX_CONVERSATION_TURNS`（現在: {Config.MAX_CONVERSATION_TURNS} ターン）**を超過すると**自動的に要約され、最新の `SUMMARY_CONVERSATION_TURNS`（現在: {Config.SUMMARY_CONVERSATION_TURNS} ターン）のみが詳細に保持されます。重要な情報や長期的に参照する必要がある内容は、必ず `memos` に追記してください。
 - 最終回答をユーザーに提示する前に、必ずthink_toolを用いて回答内容を自己評価すること。
 - 自己評価の結果、問題が見つかった場合は、回答を修正し、再度think_toolで評価を行うこと。
 - 問題がないと判断された場合にのみ、最終回答をユーザーに提示すること。

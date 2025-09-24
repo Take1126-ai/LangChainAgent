@@ -16,8 +16,10 @@ class Config: # クラス名を変更
     TAVILY_API_KEY: Optional[str] = os.getenv("TAVILY_API_KEY")
 
     # 会話履歴設定
-    # MEMORY_TURNS: 会話履歴に保持するターン数。0の場合は上限なし。
-    MEMORY_TURNS: int = int("0")
+    # MAX_CONVERSATION_TURNS: 会話履歴がこのターン数を超えたら要約を開始する。0の場合は要約しない。
+    MAX_CONVERSATION_TURNS: int = int(os.getenv("MAX_CONVERSATION_TURNS", "10"))
+    # SUMMARY_CONVERSATION_TURNS: 要約後に保持する会話のターン数。
+    SUMMARY_CONVERSATION_TURNS: int = int(os.getenv("SUMMARY_CONVERSATION_TURNS", "5"))
 
     # デバッグ設定
     DEBUG_MODE: bool = False
