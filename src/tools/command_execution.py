@@ -7,6 +7,7 @@ def run_shell_command(command: str, cwd: str = None) -> str:
     """
     指定されたシェルコマンドを実行し、その結果を返します。
     ファイルシステムやシステム状態を変更する可能性のあるコマンドを実行する前に、ユーザーの確認を求めます。
+    コマンドの出力はUTF-8でデコードされ、デコードできない文字は代替文字に置き換えられます。
 
     Args:
         command (str): 実行するシェルコマンド文字列。
@@ -20,20 +21,23 @@ def run_shell_command(command: str, cwd: str = None) -> str:
         # subprocess.run を使用してコマンドを実行
         # shell=True を指定することで、シェルを介してコマンドを実行します。
         # capture_output=True で標準出力と標準エラー出力をキャプチャします。
-        # text=True で出力をテキストとして扱います。
+        # text=False (または省略) で出力をバイトとして扱います。
         result = subprocess.run(
             command, 
             shell=True, 
             capture_output=True, 
-            text=True, 
             cwd=cwd, 
             check=False # エラーが発生しても例外を発生させない
         )
 
+        # stdoutとstderrをUTF-8でデコードし、エラーは置換
+        decoded_stdout = result.stdout.decode('utf-8', errors='replace')
+        decoded_stderr = result.stderr.decode('utf-8', errors='replace')
+
         output = f"Command: {command}\n"
         output += f"Directory: {cwd if cwd else os.getcwd()}\n"
-        output += f"Stdout: {result.stdout if result.stdout else '(empty)'}\n"
-        output += f"Stderr: {result.stderr if result.stderr else '(empty)'}\n"
+        output += f"Stdout: {decoded_stdout if decoded_stdout else '(empty)'}\n"
+        output += f"Stderr: {decoded_stderr if decoded_stderr else '(empty)'}\n"
         output += f"Exit Code: {result.returncode}\n"
 
         if result.returncode != 0:

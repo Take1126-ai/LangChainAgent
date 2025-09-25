@@ -22,6 +22,6 @@ class Config: # クラス名を変更
     SUMMARY_CONVERSATION_TURNS: int = int(os.getenv("SUMMARY_CONVERSATION_TURNS", "5"))
 
     # デバッグ設定
-    DEBUG_MODE: bool = False
+    DEBUG_MODE: bool = True
     # エージェントの内部思考を表示するかどうか
     WRITE_INNER_THOUGHTS: bool = True

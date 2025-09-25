@@ -54,6 +54,7 @@ def create_agent_prompt(state: dict) -> str:
 - 作業完了後は完了した作業を完了状態に更新して報告します。
 - 計画変更が発生したら最新の作業計画をwork_toolに登録します。
 - 未完了タスクを優先実行し、必要に応じて新規タスクを追加・修正します。
+- ツール実行時にエラーが発生した場合、同じツール呼び出しを単純に繰り返さないこと。エラーメッセージを注意深く分析し、引数が間違っていたか、アプローチ自体が問題だったかを判断すること。可能であれば、引数を修正して再試行するか、別のツールを使ってタスクの達成を試みること。自身で解決できない場合は、問題をユーザーに報告すること。
 - タスクが複数のステップを要する場合、または複雑な思考プロセスを伴う場合は、tool実行結果のうち回答に必要な情報をmemosフィールドに「作業用メモリ」として書き込むこと。
 - 作業完了時、またはmemosに記録された情報が不要になった場合は、memosフィールドから該当する情報を削除し、常に最新かつ必要な情報のみを保持すること。
 - 会話履歴は、**会話ターン数が** `MAX_CONVERSATION_TURNS`（現在: {Config.MAX_CONVERSATION_TURNS} ターン）**を超過すると**自動的に要約され、最新の `SUMMARY_CONVERSATION_TURNS`（現在: {Config.SUMMARY_CONVERSATION_TURNS} ターン）のみが詳細に保持されます。重要な情報や長期的に参照する必要がある内容は、必ず `memos` に追記してください。
@@ -82,23 +83,12 @@ todo_list は {{{{"task": "タスク内容", "completed": False}}}}の形式で�
 <現在の作業状況>
 {work_context_str}</現在の作業状況>
 
-<利用可能なツール>
-- work_tool(overall_policy: str = None, worker_role: str = None, work_rules: str = None, work_plan: str = None, work_content: str = None, work_purpose: str = None, work_results: str = None, current_issues: str = None, issue_countermeasures: str = None, next_steps: str = None, memos: str = None, todo_list: List[Dict[str, Any]] = None): 
-エージェントの作業状態、計画、課題などを管理するためのツール。作業を行う際は必ずこのツールに作業を登録する。実施した作業は作業計画上で完了状態とし、まだ完了していない作業を行う。各パラメータは各パラメータは独立して更新可能で、指定された値がAgentStateに反映されます。
-- think_tool(reflection: str): 作業の進捗、意思決定、および最終回答の品質を戦略的に振り返り、自己評価するためのツール。
-- list_directory_contents(path: str): 指定されたパスのディレクトリ内容を一覧表示します。
-- read_file(path: str): 指定されたパスのファイル内容を読み込んで返します。
-- write_file(path: str, content: str): 指定されたパスに内容を書き込みます（ファイルが存在する場合は上書きされます）。
-- delete_file(path: str): 指定されたファイルを削除します。
-- create_directory(path: str): 指定されたパスにディレクトリを新規作成します。
-- delete_directory(path: str): 指定されたディレクトリを削除します（内容物があっても削除されます）。
-- move(source_path: str, destination_path: str): ファイルまたはディレクトリを移動または名前変更します。
-- modify_file_content(path: str, old_text: str, new_text: str): 指定されたファイルの内容を読み込み、特定の文字列を別の文字列に置換して、その内容をファイルに書き戻します。このツールは、ファイル内の`old_text`の**すべての出現箇所**を`new_text`に置換します。
-- internet_search(query: str): インターネットで情報を検索し、結果の要約または関連スニペットを返します。特に、最新の情報や特定のウェブサイトからの情報を取得するのに役立ちます。
-- run_shell_command(command: str, cwd: str = None): 指定されたシェルコマンドを実行し、その結果を返します。
-- read_many_files(paths: list[str], exclude: list[str] = [], include: list[str] = [], recursive: bool = True, useDefaultExcludes: bool = True): 複数のファイルやディレクトリの内容を読み込みます。globパターンもサポートします。テキストファイルのみを対象とし、バイナリファイルはスキップされます。
-- search_file_content(pattern: str, include: str = None, path: str = None): 指定されたディレクトリ内のファイル内容から正規表現パターンを検索します。マッチした行、ファイルパス、行番号を返します。
-</利用可能なツール>
+# <利用可能なツール> に関する注意:
+# このプロンプトには、利用可能なツールの一覧は明示的に記載されていません。
+# LangChainの `bind_tools` 機能により、エージェントに渡されたツールリストから、
+# 各ツールの説明（docstring）が自動的に抽出され、LLMに提供されます。
+# そのため、新しいツールを追加または削除する際は、`src/core/agent.py` の `all_tools` リストを
+# 修正するだけでよく、このプロンプトファイルを変更する必要はありません。
 
 <ユーザー承認が必要なツール>
 ファイルシステムを変更するツール（write_file, delete_file, create_directory, delete_directory, move, run_shell_command など）を実行する際は必ずユーザーの確認を得る。

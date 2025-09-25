@@ -4,6 +4,7 @@ from langchain_core.tools import tool
 from pathlib import Path
 import fnmatch
 import re
+# from src.tools.utils import cleanse_text_data # cleanse_text_dataはここでは使用しない
 
 @tool
 def list_directory_contents(path: str) -> str:
@@ -31,8 +32,12 @@ def read_file(path: str) -> str:
         return f"エラー: パス '{path}' はファイルではありません。"
 
     try:
-        with open(path, 'r', encoding='utf-8') as f:
-            content = f.read()
+        with open(path, 'rb') as f: # Read as binary
+            raw_content = f.read()
+        
+        # Decode as UTF-8 with replacement for robustness
+        content = raw_content.decode('utf-8', errors='replace')
+
         return f"ファイル '{path}' の内容:\n---\n{content}\n---"
     except Exception as e:
         return f"ファイル '{path}' の読み込み中にエラーが発生しました: {e}"
@@ -107,9 +112,11 @@ def move(source_path: str, destination_path: str) -> str:
 def modify_file_content(path: str, old_text: str, new_text: str) -> str:
     """指定されたファイルの内容を読み込み、特定の文字列を別の文字列に置換して、その内容をファイルに書き戻します。"""
     try:
-        # ファイルを読み込む
-        with open(path, 'r', encoding='utf-8') as f:
-            content = f.read()
+        with open(path, 'rb') as f: # Read as binary
+            raw_content = f.read()
+        
+        # Decode as UTF-8 with replacement for robustness
+        content = raw_content.decode('utf-8', errors='replace')
         
         # 文字列を置換する
         modified_content = content.replace(old_text, new_text)
@@ -146,14 +153,13 @@ def read_many_files(paths: list[str], exclude: list[str] = None, include: list[s
     if include is None:
         include = []
 
-    # デフォルトの除外パターン
     default_excludes = [
         "node_modules/", ".git/", "__pycache__/", "*.pyc", "*.log", "*.tmp",
         "*.zip", "*.tar.gz", "*.rar", "*.7z", "*.exe", "*.dll", "*.so", "*.dylib",
         "*.png", "*.jpg", "*.jpeg", "*.gif", "*.bmp", "*.ico", "*.mp3", "*.mp4",
-        "*.avi", "*.mov", "*.flv", "*.wmv", "*.pdf", "*.doc", "*.docx", "*.xls",
-        "*.xlsx", "*.ppt", "*.pptx", "*.sqlite3", "*.db", "*.DS_Store",
-        "*.venv/", ".pytest_cache/", "uv.lock" # プロジェクト固有の除外
+        "*.avi", ".mov", ".flv", ".wmv", ".pdf", ".doc", ".docx", ".xls",
+        ".xlsx", ".ppt", ".pptx", ".sqlite3", ".db", ".DS_Store",
+        ".venv/", ".pytest_cache/", "uv.lock"
     ]
     if not useDefaultExcludes:
         default_excludes = []
@@ -173,24 +179,16 @@ def read_many_files(paths: list[str], exclude: list[str] = None, include: list[s
                     item_path = base_path / item
                     if item_path.is_file():
                         all_files_to_read.append(item_path)
-        else: # globパターンとして扱う
-            # glob.glob は再帰的なパターンをサポートしないため、Path.glob を使用
-            # ただし、Path.glob はカレントディレクトリからの相対パスでしか機能しないため、
-            # os.getcwd() を基準にするか、より汎用的な glob ライブラリを検討する必要がある。
-            # ここでは簡易的に Path.glob を使用するが、必要に応じて修正する。
-            # 現状の glob ツールと重複する部分もあるため、注意が必要。
-            for f in Path('.').glob(p): # カレントディレクトリからのglob
+        else:
+            for f in Path('.').glob(p):
                 if f.is_file():
                     all_files_to_read.append(f)
 
-    # フィルタリング
     filtered_files = []
     for file_path in all_files_to_read:
         file_str = str(file_path)
-        # 除外パターンにマッチしないか確認
         if any(fnmatch.fnmatch(file_str, ex) for ex in exclude + default_excludes):
             continue
-        # 含まれるパターンにマッチするか確認 (includeが指定されている場合のみ)
         if include and not any(fnmatch.fnmatch(file_str, inc) for inc in include):
             continue
         filtered_files.append(file_path)
@@ -198,12 +196,12 @@ def read_many_files(paths: list[str], exclude: list[str] = None, include: list[s
     content_parts = []
     for file_path in sorted(filtered_files): # ソートして一貫性を保つ
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            content_parts.append(f"--- {file_path} ---\n{content}")
-        except UnicodeDecodeError:
-            # テキストファイルでない場合はスキップ
-            content_parts.append(f"--- {file_path} (バイナリファイルまたは読み込みエラーのためスキップ) ---")
+            with open(file_path, 'rb') as f: # Read as binary
+                raw_content = f.read()
+            
+            # Decode as UTF-8 with replacement for robustness
+            content = raw_content.decode('utf-8', errors='replace')
+            content_parts.append(f"---\n{content}\n---")
         except Exception as e:
             content_parts.append(f"--- {file_path} (読み込みエラー: {e}) ---")
 
@@ -231,22 +229,28 @@ def search_file_content(pattern: str, include: str = None, path: str = None) -> 
     results = []
     compiled_pattern = re.compile(pattern)
 
+    all_files = []
     for root, _, files in os.walk(search_path):
         for file_name in files:
-            file_path = Path(root) / file_name
-            if include and not fnmatch.fnmatch(str(file_path), include):
-                continue
+            all_files.append(Path(root) / file_name)
+
+    for file_path in all_files:
+        if include and not fnmatch.fnmatch(str(file_path), include):
+            continue
+        
+        try:
+            with open(file_path, 'rb') as f: # Read as binary
+                raw_content = f.read()
             
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    for line_num, line in enumerate(f, 1):
-                        if compiled_pattern.search(line):
-                            results.append(f"{file_path}:{line_num}: {line.strip()}")
-            except UnicodeDecodeError:
-                # バイナリファイルはスキップ
-                continue
-            except Exception as e:
-                results.append(f"エラー: ファイル {file_path} の読み込み中にエラーが発生しました: {e}")
+            # Decode as UTF-8 with replacement for robustness
+            content = raw_content.decode('utf-8', errors='replace')
+            
+            if content is not None: # This check is redundant as decode always returns a string with errors='replace'
+                for line_num, line in enumerate(content.splitlines(), 1):
+                    if compiled_pattern.search(line):
+                        results.append(f"{file_path}:{line_num}: {line.strip()}")
+        except Exception as e:
+            results.append(f"エラー: ファイル {file_path} の読み込み中にエラーが発生しました: {e}")
 
     if not results:
         return f"パターン '{pattern}' に一致する内容はファイル内で見つかりませんでした。"
